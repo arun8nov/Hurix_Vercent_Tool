@@ -4,6 +4,8 @@ let recognition = null;
 let isListening = false;
 let isSpeaking = false;
 let sessionActive = false;
+let currentTranscript = "";
+let lastError = null;
 
 let sessionId = "";
 let chatHistory = [];
@@ -122,8 +124,17 @@ function initSpeechRecognition() {
   recognition.continuous = false; // Turn-by-turn processing
   recognition.interimResults = true; // Show text as user speaks
   
+  // Set language to selected accent
+  try {
+    recognition.lang = document.getElementById("select-accent").value || "en-US";
+  } catch (e) {
+    console.error("Error setting recognition language:", e);
+  }
+  
   recognition.onstart = () => {
     isListening = true;
+    lastError = null; // Reset error state
+    currentTranscript = ""; // Reset transcript
     const mic = document.getElementById("btn-mic");
     mic.className = "mic-btnListening";
     document.getElementById("voice-status-text").innerText = "Listening... Speak clearly now.";
@@ -143,16 +154,21 @@ function initSpeechRecognition() {
       }
     }
 
-    const displayText = finalTranscript || interimTranscript;
-    document.getElementById("user-live-transcript").innerText = displayText;
+    currentTranscript = finalTranscript || interimTranscript;
+    document.getElementById("user-live-transcript").innerText = currentTranscript || "Listening...";
   };
 
   recognition.onerror = (event) => {
     console.error("Speech Recognition Error:", event.error);
+    lastError = event.error; // Save the error
+    const statusText = document.getElementById("voice-status-text");
     if (event.error === 'no-speech') {
-      document.getElementById("voice-status-text").innerText = "No speech detected. Click mic to speak again.";
+      statusText.innerText = "No speech detected. Click mic to speak again.";
+    } else if (event.error === 'not-allowed') {
+      statusText.innerHTML = "<span style='color:#ef4444; font-weight:bold;'>Mic Permission Blocked!</span><br>Open the Web App URL directly in a new browser tab to allow mic.";
+      showToast("⚠️ Microphone access was blocked. Open the web app URL directly in a new tab.");
     } else {
-      document.getElementById("voice-status-text").innerText = "Error: " + event.error;
+      statusText.innerText = "Error: " + event.error;
     }
     stopListeningState();
   };
@@ -166,8 +182,14 @@ function initSpeechRecognition() {
       return;
     }
 
-    const transcript = document.getElementById("user-live-transcript").innerText.trim();
-    if (transcript && transcript !== "" && transcript !== "Listening..." && transcript !== "Your spoken words will appear here in real time...") {
+    // If an error occurred, do not overwrite the error status message
+    if (lastError) {
+      stopListeningState();
+      return;
+    }
+
+    const transcript = currentTranscript.trim();
+    if (transcript && transcript !== "") {
       // Process speech turn
       sendTextToAI(transcript);
     } else {
@@ -213,21 +235,41 @@ function speakResponse(text, callback) {
   utterance.rate = 0.95; // Slightly slower for language learners
   utterance.pitch = 1.0;
 
+  let callbackCalled = false;
+  const safeCallback = () => {
+    if (!callbackCalled) {
+      callbackCalled = true;
+      if (callback) callback();
+    }
+  };
+
   utterance.onend = () => {
     isSpeaking = false;
     mic.className = "mic-btnIdle";
     document.getElementById("voice-status-text").innerText = "Listening... Speak now.";
-    if (callback) callback();
+    safeCallback();
   };
 
   utterance.onerror = (e) => {
     console.error("Speech Synthesis Error:", e);
     isSpeaking = false;
     mic.className = "mic-btnIdle";
-    if (callback) callback();
+    safeCallback();
   };
 
   window.speechSynthesis.speak(utterance);
+  
+  // Safety timeout: 1.5 seconds per word + 3 seconds padding
+  const wordCount = text.split(/\s+/).length;
+  const timeoutMs = (wordCount * 1000) + 3000;
+  setTimeout(() => {
+    if (!callbackCalled && sessionActive) {
+      console.warn("Speech synthesis onend didn't fire in time. Triggering safety callback.");
+      isSpeaking = false;
+      mic.className = "mic-btnIdle";
+      safeCallback();
+    }
+  }, timeoutMs);
 }
 
 /* Toggle Session button handler */
@@ -271,6 +313,8 @@ function startVoiceSession() {
   document.getElementById("stat-turns").innerText = `0 / ${maxTurns}`;
   document.getElementById("stat-wpm").innerText = "0 WPM";
   document.getElementById("stat-grammar-avg").innerText = "-%";
+  document.getElementById("input-text-fallback").disabled = false;
+  document.getElementById("input-text-fallback").placeholder = "Type here and press Enter to send...";
   updateDurationText();
 
   // Load scenarios
@@ -309,11 +353,33 @@ function stopVoiceSession() {
   
   document.getElementById("voice-status-text").innerText = "Voice Session Finished.";
   document.getElementById("end-session-card").classList.remove("hidden");
+  
+  document.getElementById("input-text-fallback").disabled = true;
+  document.getElementById("input-text-fallback").placeholder = "Start session to type...";
+  document.getElementById("input-text-fallback").value = "";
 }
 
 function resetVoiceSession() {
   document.getElementById("end-session-card").classList.add("hidden");
   startVoiceSession();
+}
+
+function handleTextFallbackKey(event) {
+  if (event.key === "Enter") {
+    const input = document.getElementById("input-text-fallback");
+    const val = input.value.trim();
+    if (val && val !== "") {
+      input.value = "";
+      
+      // Stop listening if it's currently active
+      if (isListening && recognition) {
+        recognition.stop();
+      }
+      
+      // Send text
+      sendTextToAI(val);
+    }
+  }
 }
 
 /* Send user text to AI and receive response */

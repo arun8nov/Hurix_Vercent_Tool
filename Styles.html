@@ -859,6 +859,36 @@ input[type="range"] {
   pointer-events: none;
 }
 
+.text-fallback-container {
+  margin-top: 0.75rem;
+  width: 100%;
+}
+
+.text-fallback-container input {
+  width: 100%;
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 0.825rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.375rem;
+  outline: none;
+  transition: all 0.2s ease;
+}
+
+.text-fallback-container input:focus {
+  border-color: var(--accent-primary);
+  background-color: var(--bg-tertiary);
+}
+
+.text-fallback-container input:disabled {
+  background-color: var(--bg-primary);
+  color: var(--text-tertiary);
+  cursor: not-allowed;
+  border-color: var(--border-color);
+}
+
 /* Responsiveness tweaks */
 @media (max-width: 1024px) {
   .workspace-grid {
